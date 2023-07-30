@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(
-    name='embeddings',
+    name='broker-spec-gpt',
     version='',
     packages=[''],
     url='',
