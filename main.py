@@ -6,10 +6,12 @@ import dotenv
 from PyPDF2 import PdfReader
 from langchain.embeddings import OpenAIEmbeddings, HuggingFaceInstructEmbeddings
 from langchain.vectorstores import FAISS
-from langchain.memory import ConversationBufferMemory
+from langchain.memory import ConversationBufferMemory, ConversationBufferWindowMemory
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.llms import OpenAI
 from langchain.chains import ConversationalRetrievalChain
+from langchain.chat_models import ChatOpenAI
+from langchain.chains import ConversationChain
 
 
 def find_files(directory, wildcard):
@@ -75,22 +77,12 @@ def main():
         # get the text chunks
         text_chunks = get_text_chunks(raw_text)
 
-        # create vector store
-        # broker-spec-gpt = OpenAIEmbeddings()
-        # broker-spec-gpt = HuggingFaceInstructEmbeddings(model_name="hkunlp/instructor-xl")
-
         # for generating embeddings i use local model because it is free
         vectorstore = FAISS.from_texts(texts=text_chunks, embedding=embeddings_model)
         vectorstore.save_local(vector_store_directory)
         logging.info('vector store saved...')
 
     if args.prompt:
-        # for questions i use openai
-        embeddings = OpenAIEmbeddings
-
-        # this code doesn't work yet.  i'd like to save out the above vector store so i don't
-        # recreate it each time and then load it, but i'm getting an error.
-        #      vectorstore = FAISS.load_local('broker.vector_store', embeddings)
         vectorstore = FAISS.load_local(vector_store_directory, embeddings_model)
         logging.info('vector store loaded...')
         memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
@@ -104,9 +96,36 @@ def main():
             if query == 'quit':
                 break
 
-            result = qa({"question": query})
+            if query == 'json':
+                chat_memory = ConversationBufferWindowMemory(k=1)
 
-            print(result['answer'])
+                # this code is real hacky. there has to be a better way to transfer the memory
+                # i tried just using the other memory object, but names are different between the two
+                input_val = {}
+                output_val = {}
+                for message in memory.chat_memory.messages:
+                    if message.type == 'human':
+                        input_val['input'] = message.content
+
+                    else:
+
+                        output_val['output'] = message.content
+                        logging.info(input_val)
+                        logging.info(output_val)
+                        chat_memory.save_context(input_val, output_val)
+
+                llm = ChatOpenAI(temperature=0.0)
+
+                conversation = ConversationChain(
+                    llm=llm,
+                    memory=chat_memory,
+                    verbose=True,
+                )
+                output = conversation.predict(input='output all the messages and their required fields as a JSON string')
+                print(output)
+            else:
+                result = qa({"question": query})
+                print(result['answer'])
 
 
 if __name__ == '__main__':
